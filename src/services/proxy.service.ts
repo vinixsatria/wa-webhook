@@ -30,6 +30,16 @@ export class ProxyService {
       );
     }
 
+    console.log(`Receive incoming message from WhatsApp Gateway for session ${session}`, {
+      method: originalRequest.method,
+      originalUrl: originalRequest.url,
+      targetUrl: backendUrl,
+      headers: originalRequest.headers,
+      params: originalRequest.query,
+      body: originalRequest.body,
+      session,
+    });
+
     // const isConnected = this.proxyConfigService.isConnected(session);
     // if (!isConnected) {
     //   throw new HttpException(
@@ -61,6 +71,8 @@ export class ProxyService {
       delete axiosConfig.headers['host'];
       delete axiosConfig.headers['content-length'];
 
+      console.log(`Forward request ${originalRequest.method} to webhook ${targetUrl}`)
+
       // Lakukan request ke backend
       const axiosResponse: AxiosResponse = await axios(axiosConfig);
 
@@ -74,7 +86,20 @@ export class ProxyService {
       // Set status code
       response.status(axiosResponse.status);
 
-      // Pipe response body
+      // Pipe response body with stream-error handling
+      axiosResponse.data.on('error', (streamError) => {
+        console.error(
+          'Upstream stream error:',
+          streamError instanceof Error ? streamError.message : streamError,
+        );
+        if (!response.headersSent) {
+          response
+            .status(502)
+            .json({ statusCode: 502, message: 'Upstream stream error' });
+        } else {
+          response.end();
+        }
+      });
       axiosResponse.data.pipe(response);
 
     } catch (error) {
@@ -116,6 +141,8 @@ export class ProxyService {
         );
       }
     }
+
+    console.log(`Response from webhook`, { statusCode: response.statusCode, session });
   }
 
   async session(session: string, connected: boolean, response: Response): Promise<void> {
